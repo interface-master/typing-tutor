@@ -86,7 +86,7 @@ def discover_available_keyboards(player_keyboards):
     return available_devices
 
 
-def monitor_keyboards_thread(current_player_registering, player_keyboards, poc_running, root, ui_update_lock, update_ui):
+def monitor_keyboards_thread(current_player_registering, player_keyboards, is_running, root, ui_update_lock, update_ui):
     """
     This function runs in a separate thread. It continuously monitors
     key presses from all available keyboards and assigns them to players
@@ -97,8 +97,8 @@ def monitor_keyboards_thread(current_player_registering, player_keyboards, poc_r
     # Keeps track of devices currently being monitored by THIS thread.
     open_devices = {} # {fd: InputDevice}
 
-    while poc_running:
-        with ui_update_lock: # Safely check if PoC should continue running
+    while is_running:
+        with ui_update_lock: # Safely check if Game should continue running
             if current_player_registering > 2:
                 break # Both players registered, stop monitoring
 
@@ -133,7 +133,7 @@ def monitor_keyboards_thread(current_player_registering, player_keyboards, poc_r
         try:
             # Use select.select to wait for data on any of the file descriptors.
             # The timeout (0.05s) prevents blocking indefinitely, allowing the
-            # `poc_running` flag to be checked and the thread to terminate gracefully.
+            # `is_running` flag to be checked and the thread to terminate gracefully.
             rlist, _, _ = select.select(read_fds, [], [], 0.05)
         except ValueError as e:
             # This can happen if a file descriptor becomes invalid.
@@ -173,14 +173,14 @@ def monitor_keyboards_thread(current_player_registering, player_keyboards, poc_r
                                     print(f"Assigned Player {current_player_registering} to keyboard: {dev.name} ({dev.path})")
                                     current_player_registering += 1
                                     # Schedule UI update on the main Tkinter thread.
-                                    root.after(0, update_ui)
+                                    root.after(0, update_ui, current_player_registering)
                                     
                                     if current_player_registering > 2:
                                         print("Both players registered. Monitoring thread will stop.")
-                                        poc_running = False # Signal thread to terminate
+                                        is_running = False # Signal thread to terminate
                                         break # Exit event loop
-                if not poc_running:
-                    break # Exit fd loop if PoC is done
+                if not is_running:
+                    break # Exit fd loop if Game is done
             except BlockingIOError:
                 pass # No more events to read from this device right now, continue to next fd.
             except OSError as e:
@@ -197,8 +197,8 @@ def monitor_keyboards_thread(current_player_registering, player_keyboards, poc_r
                 # Catch any other unexpected errors during event processing.
                 print(f"Error processing event from {dev.name} ({dev.path}): {e}")
         
-        # Small sleep to prevent a tight loop if no events are detected but poc_running is still true.
-        if poc_running:
+        # Small sleep to prevent a tight loop if no events are detected but is_running is still true.
+        if is_running:
             time.sleep(0.01) 
 
     print("Keyboard monitoring thread finished.")

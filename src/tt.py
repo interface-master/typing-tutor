@@ -9,84 +9,92 @@ player_keyboards = {}  # {player_id: evdev.InputDevice}
 # Tracks which player is currently registering their keyboard (1 or 2).
 current_player_registering = 1
 # Flag to control the keyboard monitoring thread's lifecycle.
-poc_running = True
+is_running = True
 # A lock to protect access to shared state variables (player_keyboards, current_player_registering)
 # when accessed from both the main Tkinter thread and the monitoring thread.
 ui_update_lock = threading.Lock()
 
 # --- Tkinter UI Elements ---
-root = None  # The main Tkinter window
-message_label = None  # Label to display instructions and status to the user
+roots = [None, None]  # root windows for player 1 and 2
+message_labels = [None, None]  # message labels for player 1 and 2
 
 # --- Helper Functions ---
 
-def update_ui():
+def update_ui(player_id):
     """
-    Updates the Tkinter window's message label.
-    This function is scheduled to run on the main Tkinter thread using `root.after()`.
+    Updates both Tkinter windows to prompt for the current player.
     """
-    global current_player_registering, root, message_label, poc_running
+    global roots, message_labels, player_keyboards
 
-    if root is None or message_label is None: # Ensure UI elements exist
-        return
+    for i in range(2):
+        root = roots[i]
+        message_label = message_labels[i]
+        if root is None or message_label is None:
+            continue
 
-    with ui_update_lock: # Acquire lock to safely read shared state
-        if current_player_registering == 1:
+        if player_id == 1 and 1 not in player_keyboards:
             message = "Player 1: Press any key on your keyboard to register it."
-        elif current_player_registering == 2:
+        elif player_id == 2 and 2 not in player_keyboards:
             message = "Player 2: Press any key on your keyboard to register it."
-        else: # Both players have registered their keyboards
+        else:
+            # Registration complete
             msg_parts = ["All keyboards registered!\n"]
-            for player, device in player_keyboards.items():
-                msg_parts.append(f"Player {player}: {device.name} ({device.path})\n")
+            for pid, dev in player_keyboards.items():
+                msg_parts.append(f"Player {pid}: {dev.name} ({dev.path})\n")
             message = "".join(msg_parts)
-            message += "\nPoC complete. You can close this window."
-            poc_running = False # Signal the monitoring thread to stop
+            message += "\nComplete. You can close this window."
 
-    message_label.config(text=message)
+        message_label.config(text=message)
 
-
-
-def start_poc():
-    """Initializes and runs the Tkinter PoC application."""
-    global root, message_label
+def start():
+    """Initializes and runs the dual-window Tkinter application using Toplevel windows."""
+    global roots, message_labels
 
     root = tk.Tk()
-    root.title("Keyboard Registration PoC")
-    root.geometry("1280x720") # Set window size
-    root.resizable(False, False) # Prevent resizing for simplicity
+    root.withdraw()  # Hide the root window
 
-    # Configure the message label with Inter font and text wrapping.
-    message_label = tk.Label(root, text="", font=("Inter", 16), wraplength=550, justify=tk.LEFT)
-    message_label.pack(expand=True, padx=20, pady=20)
+    # Create two Toplevel windows, one for each player
+    for i in range(2):
+        win = tk.Toplevel(root)
+        win.title(f"Keyboard Registration - Player {i+1}")
+        win.geometry(f"1270x710+{i*1280}+0")  # Position windows side by side; adjust as needed
+        win.resizable(False, False)
+        label = tk.Label(win, text="", font=("Inter", 16), wraplength=550, justify=tk.LEFT)
+        label.pack(expand=True, padx=20, pady=20)
+        roots[i] = win
+        message_labels[i] = label
 
-    update_ui() # Display the initial message for Player 1
+    # Initial UI update for both windows
+    update_ui(1)
 
-    # Start the keyboard monitoring logic in a separate daemon thread.
-    # A daemon thread will automatically exit when the main program exits.
-    monitor_thread = threading.Thread(target=monitor_keyboards_thread, args=(current_player_registering, player_keyboards, poc_running, root, ui_update_lock, update_ui), daemon=True)
+    # Start keyboard monitoring thread
+    monitor_thread = threading.Thread(
+        target=monitor_keyboards_thread,
+        args=(current_player_registering, player_keyboards, is_running, root, ui_update_lock, update_ui),
+        daemon=True
+    )
     monitor_thread.start()
 
-    # Schedule a periodic check on the main Tkinter thread to see if the PoC is complete.
-    # If complete, it will gracefully close the Tkinter window.
-    def check_poc_status_and_exit():
-        if not poc_running:
-            if root is not None:
-                root.quit() # Use quit() to exit the Tkinter mainloop
+    # Periodically check if game is complete and close both windows
+    def check_game_status_and_exit():
+        if not is_running:
+            for win in roots:
+                if win is not None:
+                    win.destroy()
+            root.quit()
         else:
-            root.after(100, check_poc_status_and_exit) # Re-schedule check after 100ms
-    
-    root.after(100, check_poc_status_and_exit) # Start the periodic check
+            root.after(100, check_game_status_and_exit)
 
-    root.mainloop() # Start the Tkinter event loop
+    root.after(100, check_game_status_and_exit)
+
+    root.mainloop()
     print("Tkinter main loop finished.")
-
 
 # --- Main Execution ---
 if __name__ == "__main__":
-    print("Starting Keyboard Differentiation PoC.")
+    print("Starting Keyboard Differentiation PoC (Dual Screen).")
     print("Make sure you have appropriate read permissions for /dev/input/event* devices.")
     print("If you encounter 'Permission denied' errors, try running with 'sudo python your_script_name.py'")
-    start_poc()
+    start()
 
 
